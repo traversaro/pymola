@@ -1266,5 +1266,9 @@ class GenCasadiTest(unittest.TestCase):
         casadi_model = transfer_model(TEST_DIR, 'InlineAssignment', {'detect_aliases': True})
         self.assertTrue(casadi_model.inputs[0].fixed)
 
+    def test_custom_units(self):
+        casadi_model = transfer_model(TEST_DIR, 'CustomUnits')
+        # TODO for added certainty, assert type of dummy_parameter is DummyUnit
+
 if __name__ == "__main__":
     unittest.main()
