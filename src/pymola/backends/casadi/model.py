@@ -431,47 +431,92 @@ class Model:
             # For now, we only eliminate algebraic states.
             do_not_eliminate = set(list(der_states) + list(states) + list(inputs) + list(parameters))
 
+            def _make_alias(deps, negative_alias=False):
+                """
+                Returns True if deps can be made aliases of each other
+                """
+                if deps[0].name() in alg_states:
+                    alg_state = deps[0]
+                    other_state = deps[1]
+                elif deps[1].name() in alg_states:
+                    alg_state = deps[1]
+                    other_state = deps[0]
+                else:
+                    alg_state = None
+                    other_state = None
+
+                # If both states are algebraic, we need to decide which to eliminate
+                if deps[0].name() in alg_states and deps[1].name() in alg_states:
+                    # Most of the time it does not matter which one we eliminate.
+                    # The exception is if alg_state has already been aliased to a
+                    # variable in do_not_eliminate. If this is the case, setting the
+                    # states in the default order will cause the new canonical variable
+                    # to be other_state, unseating (and eliminating) the current
+                    # canonical variable (which is in do_not_eliminate).
+                    if alias_rel.canonical_signed(alg_state.name())[0] in do_not_eliminate:
+                        # swap the states
+                        other_state, alg_state = alg_state, other_state
+
+                if alg_state is not None:
+                    # Check to see if we are linking two entries in do_not_eliminate
+                    if alias_rel.canonical_signed(alg_state.name())[0] in do_not_eliminate and \
+                       alias_rel.canonical_signed(other_state.name())[0] in do_not_eliminate:
+                        # Don't do anything for now, we only eliminate alg_states
+                        pass
+
+                    else:
+                        # Eliminate alg_state by aliasing it to other_state
+                        if negative_alias:
+                            alias_rel.add(other_state.name(), '-' + alg_state.name())
+                        else:
+                            alias_rel.add(other_state.name(), alg_state.name())
+
+                        # To keep equations balanced, drop this equation
+                        return True
+
+                return False
+
             reduced_equations = []
             for eq in self.equations:
+                # We do fast checks first, and the slower (but more generic)
+                # checks after.
                 if eq.n_dep() == 2 and (eq.is_op(ca.OP_SUB) or eq.is_op(ca.OP_ADD)):
                     if eq.dep(0).is_symbolic() and eq.dep(1).is_symbolic():
-                        if eq.dep(0).name() in alg_states:
-                            alg_state = eq.dep(0)
-                            other_state = eq.dep(1)
-                        elif eq.dep(1).name() in alg_states:
-                            alg_state = eq.dep(1)
-                            other_state = eq.dep(0)
-                        else:
-                            alg_state = None
-                            other_state = None
+                        deps = ca.symvar(eq)
+                        assert len(deps) == 2
+                        if _make_alias(deps, eq.is_op(ca.OP_ADD)):
+                            continue
+                else:
+                    # Equation might have many "shadow" dependencies due to
+                    # e.g. vector/array expansion. By using .expand() and SX
+                    # symbols for the evaluation, we can figure out what the
+                    # real dependencies are.
+                    s_mx = ca.symvar(eq)
+                    f = ca.Function('tmp', s_mx, [eq]).expand()
+                    s_sx = [ca.SX.sym(x.name(), *x.shape) for x in s_mx]
+                    eq_sx = f.call(s_sx)[0]
 
-                        # If both states are algebraic, we need to decide which to eliminate
-                        if eq.dep(0).name() in alg_states and eq.dep(1).name() in alg_states:
-                            # Most of the time it does not matter which one we eliminate.
-                            # The exception is if alg_state has already been aliased to a
-                            # variable in do_not_eliminate. If this is the case, setting the
-                            # states in the default order will cause the new canonical variable
-                            # to be other_state, unseating (and eliminating) the current
-                            # canonical variable (which is in do_not_eliminate).
-                            if alias_rel.canonical_signed(alg_state.name())[0] in do_not_eliminate:
-                                # swap the states
-                                other_state, alg_state = alg_state, other_state
+                    # Reduced dependencies
+                    deps_sx = ca.symvar(eq_sx)
 
-                        if alg_state is not None:
-                            # Check to see if we are linking two entries in do_not_eliminate
-                            if alias_rel.canonical_signed(alg_state.name())[0] in do_not_eliminate and \
-                               alias_rel.canonical_signed(other_state.name())[0] in do_not_eliminate:
-                                # Don't do anything for now, we only eliminate alg_states
-                                pass
+                    if len(deps_sx) == 2:
+                        # Map SX dependencies back to MX dependencies
+                        deps_map = {k: v for v, k in enumerate(s_sx)}
+                        deps_mx = [s_mx[deps_map[x]] for x in deps_sx]
 
-                            else:
-                                # Eliminate alg_state by aliasing it to other_state
-                                if eq.is_op(ca.OP_SUB):
-                                    alias_rel.add(other_state.name(), alg_state.name())
-                                else:
-                                    alias_rel.add(other_state.name(), '-' + alg_state.name())
+                        # Simple add/sub expressions in SX equation
+                        if eq_sx.n_dep() == 2 and (eq_sx.is_op(ca.OP_SUB) or eq_sx.is_op(ca.OP_ADD)):
+                            if eq_sx.dep(0).is_symbolic() and eq_sx.dep(1).is_symbolic():
+                                if _make_alias(deps_mx, eq_sx.is_op(ca.OP_ADD)):
+                                    continue
 
-                                # To keep equations balanced, drop this equation
+                        # Check with substitute, which is a more expensive operation
+                        if ca.substitute(eq_sx, deps_sx[0], deps_sx[1]).is_zero():
+                            if _make_alias(deps_mx):
+                                continue
+
+                        elif ca.substitute(eq_sx, deps_sx[0], -1 * deps_sx[1]).is_zero():
+                            if _make_alias(deps_mx, True):
                                 continue
 
                 # Keep this equation

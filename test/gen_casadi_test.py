@@ -1039,14 +1039,14 @@ class GenCasadiTest(unittest.TestCase):
         ref_model = Model()
 
         x = ca.MX.sym('x')
-        y0 = ca.MX.sym('y[0]')
         y1 = ca.MX.sym('y[1]')
+        y2 = ca.MX.sym('y[2]')
 
         A = ca.MX(2, 3)
-        A[0, 0] = -1
+        A[0, 0] = -2
         A[0, 1] = 1
         A[0, 2] = 0
-        A[1, 0] = -2
+        A[1, 0] = -3
         A[1, 1] = 0
         A[1, 2] = 1
         b = ca.MX(2, 1)
@@ -1055,11 +1055,14 @@ class GenCasadiTest(unittest.TestCase):
 
         ref_model.states = list(map(Variable, []))
         ref_model.der_states = list(map(Variable, []))
-        ref_model.alg_states = list(map(Variable, [x, y0, y1]))
+        ref_model.alg_states = list(map(Variable, [x, y1, y2]))
         ref_model.inputs = list(map(Variable, []))
         ref_model.outputs = list(map(Variable, []))
-        x = ca.vertcat(x, y0, y1)
+        x = ca.vertcat(x, y1, y2)
         ref_model.equations = [ca.mtimes(A, x) + b]
+
+        # y[0] should be detected as an alias of x
+        self.assertIn('y[0]', casadi_model.alg_states[0].aliases)
 
         # Compare
         self.assert_model_equivalent_numeric(casadi_model, ref_model)
