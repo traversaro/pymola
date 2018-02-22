@@ -124,6 +124,7 @@ class GenCasadiTest(unittest.TestCase):
         casadi_model = gen_casadi.generate(ast_tree, 'Aircraft')
         # noinspection PyUnusedLocal
         ref_model = Model()
+        data = casadi_model.sim()
         self.assertTrue(True)
 
     def test_connector_hq(self):

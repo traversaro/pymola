@@ -81,6 +81,12 @@ class Model:
         r += "initial equations: " + str(self.initial_equations) + "\n"
         return r
 
+    def __repr__(self):
+        """
+        This is useful for setting the default output in jupyter notebooks
+        """
+        return self.__str__()
+
     def check_balanced(self):
         n_states = sum(v.symbol.size1() * v.symbol.size2() for v in itertools.chain(self.states, self.alg_states))
         n_equations = sum(e.size1() * e.size2() for e in self.dae_residual_function.mx_out())
@@ -91,6 +97,82 @@ class Model:
                 "System is not balanced.  "
                 "Number of states is {}, number of equations is {}.".format(
                     n_states, n_equations))
+
+    def make_explicit(self):
+        """
+        Splits the equations into a form suitable for simulation.
+        """
+
+        # ode and alg
+        der_symbols = [x.symbol for x in self.der_states]
+
+        alg = []
+        ode_dict = {}
+
+        for eq in self.equations:
+            intersect = set(ca.symvar(eq)).intersection(der_symbols)
+            # Check if alg
+            if not intersect:
+                alg.append(eq)
+            else:
+                if len(intersect) > 1:
+                    raise Exception("Derivative state cannot be function of another derivative")
+                der_state = intersect.pop()
+
+                if not ca.is_equal(eq.dep(0), der_state):
+                    raise Exception("ODE not explicit")
+
+                ode_dict[der_state] = eq.dep(1)
+
+        ode = [ode_dict[k] for k in der_symbols]
+
+        f = {'x': ca.vertcat(*[x.symbol for x in self.states]),
+             'ode': ca.vertcat(*ode),
+             'z': ca.vertcat(*[x.symbol for x in self.alg_states]),
+             'alg': ca.vertcat(*alg),
+             'p': ca.vertcat(*[x.symbol for x in self.parameters], *[x.symbol for x in self.inputs]),
+             }
+
+        return f
+
+    def sim(self, x0=None, f_u=None, t0=0, tf=10, dt=0.1):
+        """
+        Simulate the model
+        """
+        n_u = len(self.inputs)
+        if f_u is None:
+            f_u = lambda t, x, p: np.zeros(n_u)
+        t = t0
+        if x0 is None:
+            x0 = np.zeros(len(self.states))
+
+        x = x0
+        p = self.parameters
+        p_vals = [x.value for x in p]
+        u = f_u(t, x, p)
+        f = self.make_explicit()
+        integrator = ca.integrator("Phi", "idas", f, {"tf": dt})
+        y = 0
+        data = {
+            't': [t],
+            'x': [x],
+            'u': [u],
+            'y': [y]
+        }
+        while t + dt < tf:
+            t += dt
+            # compute control
+            u = f_u(t, x, p)
+            # integrate
+            res = integrator(x0=x, p=ca.vertcat(p_vals, u))
+            x = res['xf']
+            data['t'].append(t)
+            data['x'].append(np.array(res['xf'])[:,0])
+            data['u'].append(u)
+            data['y'].append(y)
+        for k in data.keys():
+            data[k] = np.array(data[k])
+        return data
 
     def _symbols(self, l):
         return [v.symbol for v in l]
