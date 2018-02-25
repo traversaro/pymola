@@ -583,6 +583,29 @@ class GenCasadiTest(unittest.TestCase):
 
         self.assert_model_equivalent_numeric(ref_model, casadi_model)
 
+    def test_array_3d(self):
+        with open(os.path.join(MODEL_DIR, 'Array3D.mo'), 'r') as f:
+            txt = f.read()
+        ast_tree = parser.parse(txt)
+        casadi_model = gen_casadi.generate(ast_tree, 'Array3D')
+        casadi_model.simplify({'expand_vectors': True})
+
+        target_param_values = np.array([[[ -5.326999,  54.050758,  0.000000],
+                                    [ -1.0,        0.0,       0.0]],
+                                   [[  0.000426,  -0.001241,  2.564056],
+                                    [ -1.0,        0.0,       0.0]],
+                                   [[  2.577975,  -5.203480,  0.000000],
+                                    [ -1.0,        0.0,       0.0]],
+                                   [[ 13.219650,  -3.097600, -7.551339],
+                                    [ -1.0,        0.0,       0.0]]])
+
+        param_symbols = [x.symbol for x in casadi_model.parameters]
+
+        for ind in np.ndindex(target_param_values.shape):
+            flat_index = np.ravel_multi_index(ind, target_param_values.shape)
+            self.assertEqual(param_symbols[flat_index].name(), "x[{}]".format(",".join((str(x + 1) for x in ind))))
+            self.assertEqual(casadi_model.parameters[flat_index].value, target_param_values[ind])
+
     def test_attributes(self):
         with open(os.path.join(MODEL_DIR, 'Attributes.mo'), 'r') as f:
             txt = f.read()

@@ -7,6 +7,7 @@ import re
 
 from pymola import ast
 from .alias_relation import AliasRelation
+from .mtensor import MTensor
 
 logger = logging.getLogger("pymola")
 
@@ -326,36 +327,28 @@ class Model:
                 new_vars = []
                 for old_var in old_vars:
                     if old_var.symbol.numel() > 1:
-                        rows = []
-                        for i in range(old_var.symbol.size1()):
-                            cols = []
-                            for j in range(old_var.symbol.size2()):
-                                if old_var.symbol.size1() > 1 and old_var.symbol.size2() > 1:
-                                    component_symbol = ca.MX.sym('{}[{},{}]'.format(old_var.symbol.name(), i, j))
-                                elif old_var.symbol.size1() > 1:
-                                    component_symbol = ca.MX.sym('{}[{}]'.format(old_var.symbol.name(), i))
-                                elif old_var.symbol.size2() > 1:
-                                    component_symbol = ca.MX.sym('{}[{}]'.format(old_var.symbol.name(), j))
+                        expanded_symbols = []
+                        for ind in np.ndindex(old_var.symbol._modelica_shape):
+                            component_symbol = ca.MX.sym('{}[{}]'.format(old_var.symbol.name(), ",".join(str(i+1) for i in ind)))
+                            component_var = Variable(component_symbol, old_var.python_type)
+                            for attribute in ast.Symbol.ATTRIBUTES:
+                                # Can't convert 3D arrays to MX, so we convert to nparray instead
+                                value = getattr(old_var, attribute)
+                                if not np.isscalar(value):
+                                    value = np.array(value)
                                 else:
-                                    raise AssertionError
-                                component_var = Variable(component_symbol, old_var.python_type)
-                                for attribute in ast.Symbol.ATTRIBUTES:
                                     value = ca.MX(getattr(old_var, attribute))
-                                    if value.size1() == old_var.symbol.size1() and value.size2() == old_var.symbol.size2():
-                                        setattr(component_var, attribute, value[i, j])
-                                    elif value.size1() == old_var.symbol.size1():
-                                        setattr(component_var, attribute, value[i])
-                                    elif value.size2() == old_var.symbol.size2():
-                                        setattr(component_var, attribute, value[j])
-                                    else:
-                                        assert value.size1() == 1
-                                        assert value.size2() == 1
-                                        setattr(component_var, attribute, value)
-                                cols.append(component_var)
-                            rows.append(cols)
-                        symbols.append(old_var.symbol)
-                        values.append(ca.vertcat(*[ca.horzcat(*[v.symbol for v in row]) for row in rows]))
-                        new_vars.extend(itertools.chain.from_iterable(rows))
+
+                                if np.prod(value.shape) == 1:
+                                    setattr(component_var, attribute, value)
+                                else:
+                                    setattr(component_var, attribute, value[ind])
+                            expanded_symbols.append(component_var)
+
+                        s = old_var.symbol._mx if isinstance(old_var.symbol, MTensor) else old_var.symbol
+                        symbols.append(s)
+                        values.append(ca.reshape(ca.vertcat(*[x.symbol for x in expanded_symbols]), *tuple(reversed(s.shape))).T)
+                        new_vars.extend(expanded_symbols)
                     else:
                         new_vars.append(old_var)
                 setattr(self, l, new_vars)
