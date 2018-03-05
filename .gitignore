@@ -72,3 +72,4 @@ venv/
 venv3/
 
 Untitled.ipynb
+.pytest_cache/
