@@ -1,6 +1,7 @@
 from .hybrid_dae import HybridDae
 import os
 from collections import OrderedDict
+import typing
 
 import casadi as ca
 # noinspection PyPackageRequirements
@@ -25,16 +26,16 @@ class XMLParser:
         return etree.fromstring(xml_file, self._parser)
 
 
-
 # noinspection PyProtectedMember,PyPep8Naming
 class ModelListener:
     """ Converts ModelicaXML file to Hybrid DAE"""
 
-    def __init__(self, verbose=False):
+    def __init__(self, sym: type=ca.SX, verbose=False):
         self.depth = 0
         self.model = {}
         self.scope_stack = []
         self.verbose = verbose
+        self.sym = sym
 
         # Define an operator map that can be used as
         # self.op_map[n_operations][operator](*args)
@@ -69,7 +70,7 @@ class ModelListener:
         """Get the derivative of the variable, create it if it doesn't exist."""
         name = 'der({:s})'.format(x.name())
         if name not in self.scope['dvar'].keys():
-            self.scope['dvar'][name] = ca.SX.sym(name, *x.shape)
+            self.scope['dvar'][name] = self.sym.sym(name, *x.shape)
             self.scope['states'].append(x.name())
         return self.scope['dvar'][name]
 
@@ -121,6 +122,7 @@ class ModelListener:
         # we don't know if variables are states
         # yet, we need to wait until equations are parsed
         self.scope_stack.append({
+            'time': self.sym.sym('time'),
             'var': OrderedDict(),  # variables
             'states': [],  # list of which variables are states (based on der call)
             'dvar': OrderedDict(),  # derivative of variables
@@ -128,14 +130,14 @@ class ModelListener:
             'when_eqs': [],  # when equations
             'c': {},  # conditions
             'p': [],  # parameters and constants
-            'properties': {},  # properties for variables
+            'prop': {},  # properties for variables
         })
 
     def exit_classDefinition(self, tree: etree._Element):
         dae = HybridDae()
         self.model[tree] = dae
         for var_name, v in self.scope['var'].items():
-            variability = self.scope['properties'][var_name]['variability']
+            variability = self.scope['prop'][var_name]['variability']
             if variability == 'continuous':
                 if var_name in self.scope['states']:
                     dae.x = ca.vertcat(dae.x, v)
@@ -151,11 +153,12 @@ class ModelListener:
             else:
                 raise ValueError('unknown variability', variability)
 
-        dae.properties.update(self.scope['properties'])
+        dae.prop.update(self.scope['prop'])
         c_dict = self.scope['c']
         dae.c = ca.vertcat(dae.c, ca.vertcat(*[k for k in c_dict]))
         dae.f_c = ca.vertcat(dae.f_c, ca.vertcat(*[ c_dict[k] for k in c_dict]))
         dae.f_x = ca.vertcat(dae.f_x, ca.vertcat(*self.scope['eqs']))
+        dae.t = self.scope['time']
         # dae.f_x.extend(self.scope['when_eqs'])
         self.scope_stack.pop()
 
@@ -174,7 +177,7 @@ class ModelListener:
         name = tree.attrib['name']
         shape = (1, 1)
         sym = ca.SX.sym(name, *shape)
-        self.scope['properties'][name] = var_scope
+        self.scope['prop'][name] = var_scope
         self.scope['var'][name] = sym
 
     def exit_local(self, tree: etree._Element):

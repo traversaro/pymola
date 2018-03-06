@@ -6,7 +6,6 @@ import sys
 import time
 import unittest
 
-from pymola.backends.xml import hybrid_dae, modelica_xml_parser
 
 TEST_DIR = os.path.dirname(os.path.realpath(__file__))
 MODEL_DIR = os.path.join(TEST_DIR, 'models')
@@ -31,6 +30,11 @@ class XmlTest(unittest.TestCase):
         time.sleep(0.01)
 
     def test_xml(self):
+        from pymola.backends.xml import hybrid_dae, modelica_xml_parser
+        from pymola.backends.xml import sim_scipy
+        import matplotlib.pyplot as plt
+
+        # parse
         parser = modelica_xml_parser.XMLParser(
             modelica_xml_parser.SCHEMA_DIR, 'Modelica.xsd')
         example_file = os.path.join(
@@ -40,4 +44,13 @@ class XmlTest(unittest.TestCase):
         modelica_xml_parser.walk(root, listener)
         model = listener.model[root][0]  # type: HybridDae
         print(model)
+
+        # convert to ode
+        model_ode = model.to_ode()  # type: HybridOde
+
+        # simulate
+        data = sim_scipy.sim(model_ode, {'tf':1.5, 'dt':0.01})
+        plt.plot(data['t'], data['x'])
+        plt.grid()
+        plt.show()
         self.flush()

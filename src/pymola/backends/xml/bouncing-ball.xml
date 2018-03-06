@@ -23,7 +23,7 @@
                 <component name="x">
                     <builtin name="Real"/>
                     <modifier>
-                        <item name="value">
+                        <item name="start">
                             <real value="10"/>
                         </item>
                     </modifier>
