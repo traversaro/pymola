@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<modelica format="1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="./ModelicaXML/schemas/Modelica.xsd">
+    <declarations>
+        <classDefinition name="BouncingBall">
+            <class kind="model">
+                <component name="g" variability="parameter">
+                    <builtin name="Real"/>
+                    <modifier>
+                        <item name="value">
+                            <real value="9.8"/>
+                        </item>
+                    </modifier>
+                </component>
+                <component name="c" variability="parameter">
+                    <builtin name="Real"/>
+                    <modifier>
+                        <item name="value">
+                            <real value="0.90"/>
+                        </item>
+                    </modifier>
+                </component>
+                <component name="x">
+                    <builtin name="Real"/>
+                    <modifier>
+                        <item name="value">
+                            <real value="10"/>
+                        </item>
+                    </modifier>
+                </component>
+                <component name="v">
+                    <builtin name="Real"/>
+                    <modifier>
+                        <item name="start">
+                            <real value="0"/>
+                        </item>
+                        <item name="fixed">
+                            <true/>
+                        </item>
+                    </modifier>
+                </component>
+                <equation>
+                    <equal>
+                        <operator name="der">
+                            <local name="x"/>
+                        </operator>
+                        <local name="v"/>
+                    </equal>
+                </equation>
+                <equation>
+                    <equal>
+                        <operator name="der">
+                            <local name="v"/>
+                        </operator>
+                        <apply builtin="-">
+                            <local name="g"/>
+                        </apply>
+                    </equal>
+                </equation>
+                <equation>
+                    <when>
+                        <cond>
+                            <operator name="lt">
+                                <local name="x"/>
+                                <real value="0"/>
+                            </operator>
+                        </cond>
+                        <then>
+                            <apply builtin="reinit">
+                                <local name="v"/>
+                                <operator name="*">
+                                    <local name="c"/>
+                                    <operator name="-">
+                                        <local name="v"/>
+                                    </operator>
+                                </operator>
+                            </apply>
+                        </then>
+                    </when>
+                </equation>
+            </class>
+        </classDefinition>
+    </declarations>
+</modelica>
