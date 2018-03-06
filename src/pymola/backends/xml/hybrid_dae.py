@@ -1,7 +1,5 @@
 import casadi as ca
 from typing import List, Dict, Union, Any
-import numpy as np
-import scipy.integrate
 
 Sym = Union[ca.SX, ca.MX]
 
@@ -112,6 +110,7 @@ class HybridOde:
         self.sym = sym  # symbol type
         self.t = sym()  # time
         self.x = sym(0, 1)  # states (have derivatives)
+        self.y = sym(0, 1)  # algebraic states
 
         # handle user args
         for k in kwargs.keys():
@@ -120,12 +119,50 @@ class HybridOde:
             else:
                 raise ValueError('unknown argument', k)
 
+        # Use just-in-time compilation to speed up the evaluation
+        if ca.Importer.has_plugin('clang'):
+            with_jit = True
+            compiler = 'clang'
+        elif ca.Importer.has_plugin('shell'):
+            with_jit = True
+            compiler = 'shell'
+        else:
+            print("WARNING; running without jit. "
+                  "This may result in very slow evaluation times")
+            with_jit = False
+            compiler = ''
+        self.func_opt = {'jit': with_jit, 'compiler': compiler}
+
     def __repr__(self):
         s = "\n"
         for x in ['c', 'dx', 'f_c', 'f_m', 'f_x_rhs', 'g_rhs', 'm', 'p', 'pre_m', 'x']:
             v = getattr(self, x)
             s += "{:6s}({:3d}):\t{:s}\n".format(x, v.shape[0], str(v))
         return s
+
+    def create_function_f_c(self):
+        return ca.Function(
+            'f_c',
+            [self.t, self.x, self.p],
+            [self.f_c], self.func_opt)
+
+    def create_function_f_x(self):
+        return ca.Function(
+            'f_x',
+            [self.t, self.x, ca.vertcat(self.p, self.c)],
+            [self.f_x_rhs], self.func_opt)
+
+    def create_function_f_J(self):
+        return ca.Function(
+            'J',
+            [self.t, self.x, ca.vertcat(self.p, self.c)],
+            [ca.jacobian(self.f_x_rhs, self.x)], self.func_opt)
+
+    def create_function_f_y(self):
+        return ca.Function(
+            'y',
+            [self.x, self.p, self.t],
+            [self.g_rhs], self.func_opt)
 
 
 class HybridDae:
@@ -173,13 +210,14 @@ class HybridDae:
             f_c=self.f_c,
             f_m=self.f_m,
             f_x_rhs=res_ode['rhs'],
+            g_rhs=res_g['rhs'],
             m=self.m,
             p=self.p,
             pre_m=self.pre_m,
             prop=self.prop,
             sym=self.sym,
             x=self.x,
-            g_rhs=res_g['rhs'],
+            y=self.y,
         )
 
 

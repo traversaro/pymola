@@ -1,7 +1,9 @@
-import casadi as ca
-import scipy.integrate
 from typing import Dict
+
+import casadi as ca
+import matplotlib.pyplot as plt
 import numpy as np
+import scipy.integrate
 
 from .hybrid_dae import HybridOde
 
@@ -23,6 +25,8 @@ def sim(model: HybridOde, options: Dict = None) -> Dict[str, np.array]:
             x0.append(ca.DM.zeros(x.numel(), 1))
         else:
             x0.append(ca.reshape(start, x.numel(), 1))
+    x0 = np.array(x0, dtype=float)
+
     p0 = []
     for x in ca.vertsplit(model.p):
         value = model.prop[x.name()]['value']
@@ -31,6 +35,7 @@ def sim(model: HybridOde, options: Dict = None) -> Dict[str, np.array]:
             p0.append(np.zeros(x.numel(), 1))
         else:
             p0.append(np.reshape(np.array(value, dtype=np.float), x.numel(), 1))
+    p0 = np.array(p0, dtype=float)
 
     # set options
     opt = {
@@ -48,73 +53,80 @@ def sim(model: HybridOde, options: Dict = None) -> Dict[str, np.array]:
             else:
                 raise ValueError("unknown option {:s}".format(k))
 
-    # Use just-in-time compilation to speed up the evaluation
-    if ca.Importer.has_plugin('clang'):
-        with_jit = True
-        compiler = 'clang'
-    elif ca.Importer.has_plugin('shell'):
-        with_jit = True
-        compiler = 'shell'
-    else:
-        print("WARNING; running without jit. "
-              "This may result in very slow evaluation times")
-        with_jit = False
-        compiler = ''
-    func_opt = {'jit': with_jit, 'compiler': compiler}
-
-    # create output function
-    output_func = ca.Function(
-        'y',
-        [model.x, model.p, model.t],
-        [model.g_rhs], func_opt)
+    # create functions
+    f_y = model.create_function_f_y()
+    f_c = model.create_function_f_c()
+    f_ode = model.create_function_f_x()
+    f_J = model.create_function_f_J()
 
     # initialize sim loop
     t0 = opt['t0']
     tf = opt['tf']
     x = opt['x0']
     p = opt['p']
-    y = ca.vertsplit(output_func(ca.vertcat(*x), ca.vertcat(*p), t0))
     dt = opt['dt']
     n = int(tf / dt)
     data = {
         't': np.arange(t0, tf, dt),
-        'x': np.zeros((n, len(x))),
-        'y': np.zeros((n, len(y)))
+        'x': np.zeros((n, model.x.numel())),
+        'y': np.zeros((n, model.y.numel())),
+        'c': np.zeros((n, model.c.numel()))
     }
-    data['t'][0] = t0
-    data['x'][0, :] = x
-    data['y'][0, :] = y
 
     # create integrator
-    f_ode = ca.Function(
-        'f',
-        [model.t, model.x, model.p],
-        [model.f_x_rhs], func_opt)
-    f_J = ca.Function(
-        'J',
-        [model.t, model.x, model.p],
-        [ca.jacobian(model.f_x_rhs, model.x)], func_opt)
     integrator = scipy.integrate.ode(f_ode, f_J)
-    integrator.set_initial_value(x, t0)
-    integrator.set_f_params(p)
-    integrator.set_jac_params(p)
     integrator.set_integrator(opt['integrator'])
 
     # run sim loop
-    for i in range(1, n):
+    for i in range(0, n):
         t = t0 + dt * i
+        c = np.array(f_c(t, x, p))
+        p_vect = np.vstack([p, c])
+
+        # setup integration steps
+        integrator.set_f_params(p_vect)
+        integrator.set_jac_params(p_vect)
+        integrator.set_initial_value(x, integrator.t)
+
+        # get x before step
+        x_pre = integrator.y
+
+        # perform integration step
         integrator.integrate(t)
         x = integrator.y
 
-        # compute output (this takes awhile, need to see how to speed it up)
-        # it could be skipped all together or only computer when the user
-        # asks for the variables for plotting after the simulation, but this
-        # prevents the user from passing a control based on the output
-        # y = output_func(ca.vertcat(*x), ca.vertcat(*p), t)
+        # hard  coded logic for bouncing, ball, need to implement this
+        if x[0] < 0 and not(x_pre[0] < 0):
+            x[0] = 0
+            x[1] = -0.7*x[1]
+        elif (x[0] < 0 and abs(x[1]) < 0.01) and not (x_pre[0] < 0 and abs(x_pre[1]) < 0.01):
+            x[0] = 0
+            x[1] = 0
+
+        # compute output
+        y = f_y(x, p, t)
 
         # store data
         data['x'][i, :] = np.array(x)
-        data['y'][i, :] = np.array(y)
+        data['y'][i, :] = ca.vertsplit(y)
+        data['c'][i, :] = ca.vertsplit(c)
 
+    data['labels'] = {}
+    for f in ['x', 'y', 'c']:
+        data['labels'][f] = [x.name() for x in ca.vertsplit(getattr(model, f))]
     return data
 
+
+def plot(data, fields=None):
+    if fields is None:
+        fields = ['x', 'y', 'c']
+    labels = []
+    lines = []
+    for f in fields:
+        if min(data[f].shape) > 0:
+            f_lines = plt.plot(data['t'], data[f], '-', alpha=0.5)
+            lines.extend(f_lines)
+            labels.extend(data['labels'][f])
+    plt.legend(lines, labels)
+    plt.xlabel('t, sec')
+    plt.grid()

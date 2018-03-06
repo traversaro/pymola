@@ -48,14 +48,32 @@
                     </equal>
                 </equation>
                 <equation>
-                    <equal>
-                        <operator name="der">
-                            <local name="v"/>
-                        </operator>
-                        <apply builtin="-">
-                            <local name="g"/>
-                        </apply>
-                    </equal>
+                    <if>
+                        <cond>
+                            <operator name="lt">
+                                <local name="x"/>
+                                <real value="0"/>
+                            </operator>
+                        </cond>
+                        <then>
+                            <equal>
+                                <operator name="der">
+                                    <local name="v"/>
+                                </operator>
+                                <real value="0"/>
+                            </equal>
+                        </then>
+                        <else>
+                            <equal>
+                                <operator name="der">
+                                    <local name="v"/>
+                                </operator>
+                                <apply builtin="-">
+                                    <local name="g"/>
+                                </apply>
+                            </equal>
+                        </else>
+                    </if>
                 </equation>
                 <equation>
                     <when>

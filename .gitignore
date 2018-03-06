@@ -74,3 +74,4 @@ venv3/
 Untitled.ipynb
 .pytest_cache/
 jit_tmp.c
+tmp*.o

@@ -1,11 +1,17 @@
 #!/usr/bin/env python
 """
+Test XML backend
 """
 import os
 import sys
 import time
 import unittest
 
+import casadi as ca
+import matplotlib.pyplot as plt
+
+from pymola.backends.xml import hybrid_dae, modelica_xml_parser
+from pymola.backends.xml import sim_scipy
 
 TEST_DIR = os.path.dirname(os.path.realpath(__file__))
 MODEL_DIR = os.path.join(TEST_DIR, 'models')
@@ -29,28 +35,19 @@ class XmlTest(unittest.TestCase):
         sys.stdout.flush()
         time.sleep(0.01)
 
-    def test_xml(self):
-        from pymola.backends.xml import hybrid_dae, modelica_xml_parser
-        from pymola.backends.xml import sim_scipy
-        import matplotlib.pyplot as plt
-
+    def test_bouncing_ball(self):
         # parse
-        parser = modelica_xml_parser.XMLParser(
-            modelica_xml_parser.SCHEMA_DIR, 'Modelica.xsd')
         example_file = os.path.join(
             modelica_xml_parser.FILE_PATH, 'bouncing-ball.xml')
-        root = parser.read_file(example_file)
-        listener = modelica_xml_parser.ModelListener(verbose=True)
-        modelica_xml_parser.walk(root, listener)
-        model = listener.model[root][0]  # type: HybridDae
-        print(model)
+        model = modelica_xml_parser.parse(example_file)
 
         # convert to ode
-        model_ode = model.to_ode()  # type: HybridOde
+        model_ode = model.to_ode()  # type: hybrid_dae.HybridOde
 
         # simulate
-        data = sim_scipy.sim(model_ode, {'tf':1.5, 'dt':0.01})
-        plt.plot(data['t'], data['x'])
-        plt.grid()
+        data = sim_scipy.sim(model_ode, {'tf': 10, 'dt': 0.01})
+
+        # plot
+        sim_scipy.plot(data)
         plt.show()
         self.flush()

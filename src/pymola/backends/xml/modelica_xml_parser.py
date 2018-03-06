@@ -1,7 +1,7 @@
 from .hybrid_dae import HybridDae
 import os
 from collections import OrderedDict
-import typing
+from typing import Union
 
 import casadi as ca
 # noinspection PyPackageRequirements
@@ -26,11 +26,14 @@ class XMLParser:
         return etree.fromstring(xml_file, self._parser)
 
 
+Sym = Union[ca.MX, ca.SX]
+
+
 # noinspection PyProtectedMember,PyPep8Naming
 class ModelListener:
     """ Converts ModelicaXML file to Hybrid DAE"""
 
-    def __init__(self, sym: type=ca.SX, verbose=False):
+    def __init__(self, sym: Sym=ca.SX, verbose=False):
         self.depth = 0
         self.model = {}
         self.scope_stack = []
@@ -157,7 +160,9 @@ class ModelListener:
         c_dict = self.scope['c']
         dae.c = ca.vertcat(dae.c, ca.vertcat(*[k for k in c_dict]))
         dae.f_c = ca.vertcat(dae.f_c, ca.vertcat(*[ c_dict[k] for k in c_dict]))
-        dae.f_x = ca.vertcat(dae.f_x, ca.vertcat(*self.scope['eqs']))
+        for eq in self.scope['eqs']:
+            if isinstance(eq, self.sym):
+                dae.f_x = ca.vertcat(dae.f_x, eq)
         dae.t = self.scope['time']
         # dae.f_x.extend(self.scope['when_eqs'])
         self.scope_stack.pop()
@@ -188,18 +193,26 @@ class ModelListener:
         op = tree.attrib['name']
         self.model[tree] = self.op_map[len(tree)][op](*[self.model[e] for e in tree])
 
+    def exit_if(self, tree: etree._Element):
+        cond = self.model[tree[0]]
+        then_eq = self.model[tree[1]]
+        else_eq = self.model[tree[2]]
+        c = ca.SX.sym('c_{:d}'.format(len(self.scope['c'])))
+        self.scope['c'][c] = cond
+        self.model[tree] = ca.if_else(c, then_eq, else_eq)
+
     def exit_apply(self, tree: etree._Element):
         op = tree.attrib['builtin']
         self.model[tree] = self.op_map[len(tree)][op](*[self.model[e] for e in tree])
 
     def exit_equal(self, tree: etree._Element):
         self.model[tree] = self.model[tree[0]] - self.model[tree[1]]
-        self.scope['eqs'].append(self.model[tree])
 
     def exit_equation(self, tree: etree._Element):
         # must be an equal equation since it is flattened
         assert len(tree) == 1
         self.model[tree] = self.model[tree[0]]
+        self.scope['eqs'].append(self.model[tree])
 
     def exit_modifier(self, tree: etree._Element):
         props = {}
@@ -242,9 +255,12 @@ class ModelListener:
     def exit_then(self, tree: etree._Element):
         self.model[tree] = self.model[tree[0]]
 
+    def exit_else(self, tree: etree._Element):
+        self.model[tree] = self.model[tree[0]]
+
 
 # noinspection PyProtectedMember
-def walk(e: etree._Element, l: ModelListener):
+def walk(e: etree._Element, l: ModelListener) -> None:
     tag = e.tag
     l.call('enter_every_before', e)
     l.call('enter_' + tag, e)
@@ -256,13 +272,9 @@ def walk(e: etree._Element, l: ModelListener):
     l.call('exit_every_after', e)
 
 
-if __name__ == "__main__":
+def parse(file_path: str, verbose: bool=False) -> HybridDae:
     parser = XMLParser(SCHEMA_DIR, 'Modelica.xsd')
-    example_file = os.path.join(
-        FILE_PATH, 'bouncing-ball.xml')
-    root = parser.read_file(example_file)
-    listener = ModelListener(verbose=True)
+    root = parser.read_file(file_path)
+    listener = ModelListener(verbose=verbose)
     walk(root, listener)
-    model = listener.model[root][0]  # type: HybridDae
-    print(model)
-    # print(type(model.x[0]))
+    return listener.model[root][0]
